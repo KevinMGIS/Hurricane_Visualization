@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hurricane Tracks Visualization</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    /* Base styles */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background-color: #004080;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+    }
+    /* Flex container for charts */
+    #chartsRow {
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+      width: 80%;
+      margin: 20px auto;
+    }
+    /* Chart container styles */
+    #chartContainer, #windSpeedContainer, #trackLengthContainer {
+      flex: 1;
+      min-width: 300px;
+      margin: 10px;
+    }
+    /* Map container and overlay styles */
+    #map {
+      width: 100%;
+      height: 500px;
+      position: relative;
+    }
+    #statsOverlay {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.8);
+      padding: 5px 10px;
+      border-radius: 5px;
+    }
+    /* New controls overlay styling */
+    #controlsOverlay {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      text-align: left;
+    }
+    .legend i {
+      width: 18px;
+      height: 18px;
+      display: inline-block;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Historic Hurricane Tracks Visualization</h1>
+  </header>
+
+  <!-- Flex container for charts -->
+  <div id="chartsRow">
+    <!-- Chart Container for Storms per Month -->
+    <div id="chartContainer">
+      <canvas id="stormsChart" width="400" height="200"></canvas>
+    </div>
+    <!-- Chart Container for Average Wind Speed per Month -->
+    <div id="windSpeedContainer">
+      <canvas id="windSpeedChart" width="400" height="200"></canvas>
+    </div>
+    <!-- Chart Container for Storm Track Lengths per Month -->
+    <div id="trackLengthContainer">
+      <canvas id="trackLengthChart" width="400" height="200"></canvas>
+    </div>
+  </div>
+
+  <main>
+    <!-- Map Container with overlayed statistics and controls -->
+    <div id="map">
+      <div id="statsOverlay">
+        <p>Statistics: <span id="statsContent"></span></p>
+      </div>
+      <!-- Controls overlay in the bottom left -->
+      <div id="controlsOverlay">
+        <label for="yearSelector">Select Year:</label>
+        <select id="yearSelector"></select>
+        <br/>
+        <input type="checkbox" id="majorToggle" />
+        <label for="majorToggle">Show only major hurricanes</label>
+        <br/>
+        <button id="playAnimation">Play Animation</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- Chart.js Library -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- All custom JS is now inline -->
+  <script>
+    // Helper function to parse a date string in "YYYYMMDD" format.
+    function parseDate(dateString) {
+      var year = Number(dateString.substring(0, 4));
+      var month = Number(dateString.substring(4, 6)) - 1; // month is 0-indexed
+      var day = Number(dateString.substring(6, 8));
+      return { year: year, month: month, day: day };
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+      const startYear = 1967;
+      const endYear = 2024;
+      const years = [];
+      for (let y = endYear; y >= startYear; y--) {
+        years.push(y);
+      }
+      
+      const yearSelector = document.getElementById('yearSelector');
+      years.forEach(year => {
+        let option = document.createElement('option');
+        option.value = year;
+        option.textContent = year;
+        yearSelector.appendChild(option);
+      });
+
+      fetch('data/processed/hurdat2.json')
+        .then(response => response.json())
+        .then(data => {
+          console.log("Hurricane data loaded:", data);
+          initializeMap(data);
+          updateStatistics(data, yearSelector.value);
+          updateStormsChart(data, yearSelector.value);
+          updateAverageWindChart(data, yearSelector.value);
+          updateTrackLengthChart(data, yearSelector.value);
+        })
+        .catch(error => console.error("Error loading hurricane data:", error));
+
+      yearSelector.addEventListener('change', function() {
+        updateMapByYear(yearSelector.value);
+        updateStatistics(window.hurricaneData, yearSelector.value);
+        updateStormsChart(window.hurricaneData, yearSelector.value);
+        updateAverageWindChart(window.hurricaneData, yearSelector.value);
+        updateTrackLengthChart(window.hurricaneData, yearSelector.value);
+      });
+      
+      document.getElementById('majorToggle').addEventListener('change', function() {
+        updateMapByYear(document.getElementById('yearSelector').value);
+      });
+
+      document.getElementById('playAnimation').addEventListener('click', function() {
+        playHurricaneAnimation();
+      });
+    });
+
+    function getStormColor(storm, year) {
+      var obsForYear = storm.observations.filter(function(obs) {
+        if (!obs.date) return false;
+        var d = parseDate(obs.date);
+        return d.year === Number(year) && obs.wind;
+      });
+      if (obsForYear.length === 0) {
+        return 'gray';
+      }
+      var maxWind = Math.max.apply(null, obsForYear.map(function(obs) { return obs.wind; }));
+      if (maxWind >= 157) {
+        return 'red';
+      } else if (maxWind >= 130) {
+        return 'orange';
+      } else if (maxWind >= 111) {
+        return 'yellow';
+      } else if (maxWind >= 96) {
+        return 'green';
+      } else if (maxWind >= 74) {
+        return 'blue';
+      } else {
+        return 'gray';
+      }
+    }
+
+    var map;
+    function initializeMap(data) {
+      map = L.map('map').setView([25, -75], 5);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(map);
+      var legend = L.control({position: 'topright'});
+      legend.onAdd = function (map) {
+        var div = L.DomUtil.create('div', 'info legend');
+        var grades = ['Cat 5 (>=157 mph)', 'Cat 4 (130-156 mph)', 'Cat 3 (111-129 mph)', 'Cat 2 (96-110 mph)', 'Cat 1 (74-95 mph)', 'Tropical (<74 mph)'];
+        var colors = ['red', 'orange', 'yellow', 'green', 'blue', 'gray'];
+        for (var i = 0; i < grades.length; i++) {
+          div.innerHTML += '<i style="background:' + colors[i] + ';"></i> ' + grades[i] + '<br>';
+        }
+        return div;
+      };
+      legend.addTo(map);
+      window.hurricaneData = data;
+      const yearSelector = document.getElementById('yearSelector');
+      if (yearSelector) {
+        updateMapByYear(yearSelector.value);
+      }
+    }
+
+    function updateMapByYear(year) {
+      if (window.hurricaneLayer) {
+        map.removeLayer(window.hurricaneLayer);
+      }
+      window.hurricaneLayer = L.layerGroup().addTo(map);
+      var showMajorOnly = document.getElementById('majorToggle').checked;
+      var filteredStorms = window.hurricaneData.filter(function(storm) {
+        var hasObservationInYear = storm.observations.some(function(obs) {
+          if (!obs.date) return false;
+          var d = parseDate(obs.date);
+          return d.year === Number(year);
+        });
+        if (!hasObservationInYear) return false;
+        if (showMajorOnly) {
+          return storm.observations.some(function(obs) {
+            if (!obs.date) return false;
+            var d = parseDate(obs.date);
+            return d.year === Number(year) && obs.wind && obs.wind >= 111;
+          });
+        }
+        return true;
+      });
+      filteredStorms.forEach(function(storm) {
+        var latlngs = storm.observations
+          .filter(function(obs) {
+            if (!obs.date) return false;
+            var d = parseDate(obs.date);
+            return d.year === Number(year) && obs.latitude !== null && obs.longitude !== null;
+          })
+          .map(function(obs) {
+            return [obs.latitude, obs.longitude];
+          });
+        if (latlngs.length > 0) {
+          var color = getStormColor(storm, year);
+          L.polyline(latlngs, { color: color }).addTo(window.hurricaneLayer);
+        }
+      });
+    }
+
+    function updateStatistics(data, year) {
+      var totalCount = data.filter(function(storm) {
+        return storm.observations.some(function(obs) {
+          if (!obs.date) return false;
+          var d = parseDate(obs.date);
+          return d.year === Number(year);
+        });
+      }).length;
+      var majorCount = data.filter(function(storm) {
+        return storm.observations.some(function(obs) {
+          if (!obs.date) return false;
+          var d = parseDate(obs.date);
+          return d.year === Number(year) && obs.wind && obs.wind >= 111;
+        });
+      }).length;
+      var statsContent = document.getElementById('statsContent');
+      if (statsContent) {
+        statsContent.textContent = 'Total storms in ' + year + ': ' + totalCount + ', Major storms: ' + majorCount;
+      }
+    }
+
+    function playHurricaneAnimation() {
+      var year = document.getElementById('yearSelector').value;
+      var showMajorOnly = document.getElementById('majorToggle').checked;
+      var storms = window.hurricaneData.filter(function(storm) {
+        var hasObservationInYear = storm.observations.some(function(obs) {
+          if (!obs.date) return false;
+          var d = parseDate(obs.date);
+          return d.year === Number(year);
+        });
+        if (!hasObservationInYear) return false;
+        if (showMajorOnly) {
+          return storm.observations.some(function(obs) {
+            if (!obs.date) return false;
+            var d = parseDate(obs.date);
+            return d.year === Number(year) && obs.wind && obs.wind >= 111;
+          });
+        }
+        return true;
+      });
+      if (window.hurricaneLayer) {
+        map.removeLayer(window.hurricaneLayer);
+      }
+      window.hurricaneLayer = L.layerGroup().addTo(map);
+      var animatedPolylines = [];
+      var stormLatLngs = [];
+      storms.forEach(function(storm) {
+        var latlngs = storm.observations
+          .filter(function(obs) {
+            if (!obs.date) return false;
+            var d = parseDate(obs.date);
+            return d.year === Number(year) && obs.latitude !== null && obs.longitude !== null;
+          })
+          .map(function(obs) {
+            return [obs.latitude, obs.longitude];
+          });
+        stormLatLngs.push(latlngs);
+        var color = getStormColor(storm, year);
+        var polyline = L.polyline([], { color: color }).addTo(window.hurricaneLayer);
+        animatedPolylines.push(polyline);
+      });
+      var maxPoints = Math.max.apply(null, stormLatLngs.map(function(latlngs) { return latlngs.length; }));
+      var currentIndex = 0;
+      var animationInterval = setInterval(function() {
+        if (currentIndex > maxPoints) {
+          clearInterval(animationInterval);
+          return;
+        }
+        animatedPolylines.forEach(function(polyline, i) {
+          var latlngs = stormLatLngs[i];
+          if (currentIndex <= latlngs.length) {
+            polyline.setLatLngs(latlngs.slice(0, currentIndex));
+          }
+        });
+        currentIndex++;
+      }, 500);
+    }
+
+    function updateStormsChart(data, year) {
+      let monthlyCounts = new Array(12).fill(0);
+      data.forEach(function(storm) {
+        let uniqueMonths = new Set();
+        storm.observations.forEach(function(obs) {
+          if (obs.date) {
+            var d = parseDate(obs.date);
+            console.log('Observation date:', obs.date, 'Parsed year:', d.year, 'Selected year:', year);
+            if (d.year === Number(year)) {
+              uniqueMonths.add(d.month);
+            }
+          }
+        });
+        uniqueMonths.forEach(function(month) {
+          monthlyCounts[month]++;
+        });
+      });
+      const seasonLabels = ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
+      let seasonCounts = monthlyCounts.slice(5, 11);
+      var ctx = document.getElementById('stormsChart').getContext('2d');
+      if (window.stormsChart && typeof window.stormsChart.destroy === 'function') {
+        window.stormsChart.destroy();
+      }
+      window.stormsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: seasonLabels,
+          datasets: [{
+            label: 'Number of Storms',
+            data: seasonCounts,
+            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Storm Count' }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            title: { display: true, text: 'Storms per Month in ' + year }
+          }
+        }
+      });
+    }
+
+    function updateAverageWindChart(data, year) {
+      let monthlyWindSum = new Array(12).fill(0);
+      let monthlyWindCount = new Array(12).fill(0);
+      data.forEach(function(storm) {
+        storm.observations.forEach(function(obs) {
+          if (obs.date && obs.wind) {
+            var d = parseDate(obs.date);
+            if (d.year === Number(year)) {
+              monthlyWindSum[d.month] += obs.wind;
+              monthlyWindCount[d.month]++;
+            }
+          }
+        });
+      });
+      let averageWind = monthlyWindSum.map(function(sum, i) {
+        return monthlyWindCount[i] ? (sum / monthlyWindCount[i]).toFixed(1) : 0;
+      });
+      const seasonLabels = ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
+      let seasonAverage = averageWind.slice(5, 11);
+      var ctx = document.getElementById('windSpeedChart').getContext('2d');
+      if (window.windSpeedChart && typeof window.windSpeedChart.destroy === 'function') {
+        window.windSpeedChart.destroy();
+      }
+      window.windSpeedChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: seasonLabels,
+          datasets: [{
+            label: 'Average Wind Speed (mph)',
+            data: seasonAverage,
+            backgroundColor: 'rgba(255, 159, 64, 0.5)',
+            borderColor: 'rgba(255, 159, 64, 1)',
+            fill: false,
+            tension: 0.1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Wind Speed (mph)' }
+            }
+          },
+          plugins: {
+            legend: { display: true },
+            title: { display: true, text: 'Average Wind Speed per Month in ' + year }
+          }
+        }
+      });
+    }
+
+    function updateTrackLengthChart(data, year) {
+      let monthlyDistance = new Array(12).fill(0);
+      data.forEach(function(storm) {
+        let obs = storm.observations.filter(function(o) {
+          return o.date && o.latitude !== null && o.longitude !== null;
+        }).sort(function(a, b) {
+          return Number(a.date) - Number(b.date);
+        });
+        for (let i = 1; i < obs.length; i++) {
+          let prev = obs[i - 1];
+          let curr = obs[i];
+          let prevDate = parseDate(prev.date);
+          let currDate = parseDate(curr.date);
+          if (prevDate.year === Number(year) && currDate.year === Number(year) && prevDate.month === currDate.month) {
+            monthlyDistance[prevDate.month] += computeDistance(prev.latitude, prev.longitude, curr.latitude, curr.longitude);
+          }
+        }
+      });
+      console.log('Monthly Distance (all months):', monthlyDistance);
+      monthlyDistance = monthlyDistance.map(function(dist) {
+        return dist.toFixed(1);
+      });
+      const seasonLabels = ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"];
+      let seasonDistance = monthlyDistance.slice(5, 11);
+      var ctx = document.getElementById('trackLengthChart').getContext('2d');
+      if (window.trackLengthChart && typeof window.trackLengthChart.destroy === 'function') {
+        window.trackLengthChart.destroy();
+      }
+      window.trackLengthChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: seasonLabels,
+          datasets: [{
+            label: 'Total Track Length (km)',
+            data: seasonDistance,
+            backgroundColor: 'rgba(75, 192, 192, 0.5)',
+            borderColor: 'rgba(75, 192, 192, 1)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Distance (km)' }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            title: { display: true, text: 'Storm Track Lengths per Month in ' + year }
+          }
+        }
+      });
+    }
+
+    function computeDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371; // Radius of the Earth in km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+  </script>
+</body>
+</html>
