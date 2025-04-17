@@ -11,13 +11,15 @@
   <style>
     /* Base styles */
     body {
+      background-color: #121212;
+      color: #e0e0e0;
       font-family: Arial, sans-serif;
       margin: 0;
       padding: 0;
     }
     header {
-      background-color: #004080;
-      color: white;
+      background-color: #1f1f1f;
+      color: #e0e0e0;
       padding: 1rem;
       text-align: center;
     }
@@ -40,6 +42,7 @@
       width: 100%;
       height: 500px;
       position: relative;
+      background-color: #1e1e1e;
     }
     #statsOverlay {
       position: absolute;
@@ -47,7 +50,8 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;
-      background: rgba(255, 255, 255, 0.8);
+      background: rgba(0, 0, 0, 0.7);
+      color: #e0e0e0;
       padding: 5px 10px;
       border-radius: 5px;
     }
@@ -57,7 +61,8 @@
       bottom: 10px;
       left: 10px;
       z-index: 1000;
-      background: rgba(255, 255, 255, 0.9);
+      background: rgba(0, 0, 0, 0.7);
+      color: #e0e0e0;
       padding: 10px;
       border-radius: 5px;
       text-align: left;
@@ -68,11 +73,16 @@
       display: inline-block;
       margin-right: 5px;
     }
+    .info.legend {
+      background: rgba(0, 0, 0, 0.7);
+      color: #e0e0e0;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>Historic Hurricane Tracks Visualization</h1>
+    <p><a href="#projectWriteup" style="color: #64b5f6; text-decoration: none;">Project Write-up</a></p>
   </header>
 
   <!-- Flex container for charts -->
@@ -109,7 +119,67 @@
       </div>
     </div>
   </main>
-
+  <!-- Project write-up section -->
+  <section id="projectWriteup" style="padding: 2rem 5%; background-color: #1f1f1f; color: #e0e0e0;">
+    <h2>Project Write-up</h2>
+    <p>This interactive visualization project brings to life historical hurricane tracks across the Atlantic and Gulf of America for June through November, leveraging NOAA's HURDAT2 dataset. Below is an overview of each phase of development:</p>
+    <h3>Phase 1: Data Preparation</h3>
+    <ul>
+      <li>Fetched the raw HURDAT2 data from NOAA and wrote a conversion script in JavaScript to parse the fixed-width format into structured JSON.</li>
+      <li>Stored the processed JSON in <code>data/processed/hurdat2.json</code> for easy client-side access.</li>
+    </ul>
+    <h3>Phase 2: Interactive Map & Controls</h3>
+    <ul>
+      <li>Built an interactive Leaflet map centered on the Atlantic and Gulf of America.</li>
+      <li>Added a “Select Year” dropdown (1967–2024) and a “Show only major hurricanes” toggle overlaying the map in the bottom left.</li>
+      <li>Disabled separate JS file references and inlined all custom code for simplicity.</li>
+    </ul>
+    <h3>Phase 3: Data Visualization with Charts</h3>
+    <ul>
+      <li>Created three Chart.js visualizations showing:
+        <ul>
+          <li>Storms per month (unique storms counted once per month).</li>
+          <li>Average wind speed per month.</li>
+          <li>Total storm track lengths per month.</li>
+        </ul>
+      </li>
+      <li>Filtered charts to only display the hurricane season (June–November).</li>
+      <li>Ensured that each chart is rendered side-by-side in a responsive flex container.</li>
+    </ul>
+    <h3>Phase 4: Animation & Legend</h3>
+    <ul>
+      <li>Implemented an animated replay that progressively draws each storm’s path.</li>
+      <li>Added a color-coded legend in the top right corner for hurricane categories (Cat 1–5).</li>
+    </ul>
+    <h3>Phase 5: Dark Theme & Styling</h3>
+    <ul>
+      <li>Swapped to Carto’s dark basemap for a cohesive nighttime aesthetic.</li>
+      <li>Applied a full-page dark theme via CSS: dark backgrounds, light text, and semi-transparent overlays.</li>
+    </ul>
+    <h3>Key Code Snippets</h3>
+    <p><strong>Parsing Dates (YYYYMMDD):</strong></p>
+    <pre style="background: #121212; color: #e0e0e0; padding: 1rem; overflow-x: auto;"><code>function parseDate(dateString) {
+  const year = +dateString.slice(0,4);
+  const month = +dateString.slice(4,6) - 1;
+  const day = +dateString.slice(6,8);
+  return { year, month, day };
+}</code></pre>
+    <p><strong>Counting Unique Storms per Month:</strong></p>
+    <pre style="background: #121212; color: #e0e0e0; padding: 1rem; overflow-x: auto;"><code>function updateStormsChart(data, year) {
+  const counts = Array(12).fill(0);
+  data.forEach(storm => {
+    const months = new Set();
+    storm.observations.forEach(obs => {
+      const d = parseDate(obs.date);
+      if (d.year === +year) months.add(d.month);
+    });
+    months.forEach(m => counts[m]++);
+  });
+  // build bar chart with counts.slice(5,11)
+}</code></pre>
+  </section>
+  <!-- End of write-up -->
+  
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <!-- Chart.js Library -->
@@ -198,8 +268,8 @@
     var map;
     function initializeMap(data) {
       map = L.map('map').setView([25, -75], 5);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', {
+        attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a>'
       }).addTo(map);
       var legend = L.control({position: 'topright'});
       legend.onAdd = function (map) {
